@@ -1,0 +1,9 @@
+[package]
+name = "graphy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ndarray = "0.17.1"
+ndarray-linalg = "0.17.0"
+num-traits = "0.2.19"
