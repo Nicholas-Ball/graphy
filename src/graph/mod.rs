@@ -13,8 +13,7 @@ use nalgebra::Scalar;
 pub struct Graph<T, V: Copy + num_traits::identities::Zero + nalgebra::Scalar> {
     pub vertexes: Vec<T>,
 
-    pub edges: nalgebra::DMatrix<V>,
-    pub adjacency_directed: nalgebra::DMatrix<V>,
+    pub adjacency: nalgebra::DMatrix<V>,
     pub degrees: nalgebra::DMatrix<V>,
     pub incoming_degrees: nalgebra::DMatrix<V>,
     pub outgoing_degrees: nalgebra::DMatrix<V>,
@@ -78,17 +77,14 @@ impl<T, V: num_traits::identities::Zero + Copy + num_traits::identities::One + n
         V: nalgebra::Scalar + num_traits::Zero + num_traits::One + Copy + std::ops::AddAssign,
     {
         let n = self.vertexes.len();
-        let mut edge_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-        let mut adjacency_directed = nalgebra::DMatrix::<V>::zeros(n, n);
+        let mut adjacency_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
         let mut degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
         let mut incoming_degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
         let mut outgoing_degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
 
         for (from, to, value) in self.edges.iter() {
-            // Fill adjacency
-            adjacency_directed[(*from, *to)] = *value;
-
-            edge_matrix[(*to, *from)] = *value;
+            adjacency_matrix[(*to, *from)] = *value;
+            adjacency_matrix[(*from, *to)] = *value;
 
             // Update weighted degrees
             outgoing_degree_matrix[(*from, *from)] += *value;
@@ -99,9 +95,8 @@ impl<T, V: num_traits::identities::Zero + Copy + num_traits::identities::One + n
 
         Graph {
             vertexes: self.vertexes,
-            edges: edge_matrix,
+            adjacency: adjacency_matrix,
             degrees: degree_matrix,
-            adjacency_directed,
             incoming_degrees: incoming_degree_matrix,
             outgoing_degrees: outgoing_degree_matrix,
         }
@@ -120,7 +115,7 @@ impl<T, V: Copy + Debug + Scalar + num_traits::Zero> Graph<T, V> {
     ///
     /// The value of the edge from `from` to `to`.
     pub fn get_edge_value(&self, from: usize, to: usize) -> V {
-        self.edges[(from, to)]
+        self.adjacency[(from, to)]
     }
 
     /// Returns the number of vertices in the graph.
@@ -162,19 +157,19 @@ mod tests {
         assert_eq!(idx2, 1);
         let g = builder.build();
         assert_eq!(g.vertexes, vec![42, 99]);
-        assert_eq!(g.edges.shape(), (2, 2));
-        assert_eq!(g.edges[(0, 0)], 0);
-        assert_eq!(g.edges[(0, 1)], 0);
-        assert_eq!(g.edges[(1, 0)], 0);
-        assert_eq!(g.edges[(1, 1)], 0);
+        assert_eq!(g.adjacency.shape(), (2, 2));
+        assert_eq!(g.adjacency[(0, 0)], 0);
+        assert_eq!(g.adjacency[(0, 1)], 0);
+        assert_eq!(g.adjacency[(1, 0)], 0);
+        assert_eq!(g.adjacency[(1, 1)], 0);
     }
 
     #[test]
     fn test_add_edges_and_matrix_values() {
         let mut builder = GraphBuilder::<i32, i32>::new();
+        builder.add_vertex(0);
         builder.add_vertex(1);
         builder.add_vertex(2);
-        builder.add_vertex(3);
         let a = 0;
         let b = 1;
         let c = 2;
@@ -182,22 +177,32 @@ mod tests {
         builder.add_edge(b, c, 20);
         builder.add_edge(c, a, 30);
         let g = builder.build();
-        assert_eq!(g.vertexes, vec![1, 2, 3]);
-        assert_eq!(g.edges.shape(), (3, 3));
-        // edges matrix stores at (to, from)
-        assert_eq!(g.edges[(b, a)], 10);
-        assert_eq!(g.edges[(c, b)], 20);
-        assert_eq!(g.edges[(a, c)], 30);
+        assert_eq!(g.vertexes, vec![0, 1, 2]);
+        assert_eq!(g.adjacency.shape(), (3, 3));
+        // adjacency is symmetric: store at both (to, from) and (from, to)
+        assert_eq!(g.adjacency[(b, a)], 10);
+        assert_eq!(g.adjacency[(a, b)], 10);
+        assert_eq!(g.adjacency[(c, b)], 20);
+        assert_eq!(g.adjacency[(b, c)], 20);
+        assert_eq!(g.adjacency[(a, c)], 30);
+        assert_eq!(g.adjacency[(c, a)], 30);
         // Check unset edges are zero
         for i in 0..3 {
             for j in 0..3 {
-                let expected = if (i == b && j == a) || (i == c && j == b) || (i == a && j == c) {
-                    None
-                } else {
-                    Some(i32::zero())
-                };
-                if let Some(z) = expected {
-                    assert_eq!(g.edges[(i, j)], z, "Expected zero at ({i},{j})");
+                let is_edge = (i == b && j == a)
+                    || (i == a && j == b)
+                    || (i == c && j == b)
+                    || (i == b && j == c)
+                    || (i == a && j == c)
+                    || (i == c && j == a);
+                if !is_edge {
+                    assert_eq!(
+                        g.adjacency[(i, j)],
+                        i32::zero(),
+                        "Expected zero at ({}, {})",
+                        i,
+                        j
+                    );
                 }
             }
         }
@@ -214,7 +219,7 @@ mod tests {
         builder.add_edge(u, v, 2);
         let g = builder.build();
         // edges matrix stores at (to, from)
-        assert_eq!(g.edges[(v, u)], 2);
+        assert_eq!(g.adjacency[(v, u)], 2);
     }
 
     #[test]
@@ -222,7 +227,7 @@ mod tests {
         let builder = GraphBuilder::<i32, i32>::new();
         let g = builder.build();
         assert_eq!(g.vertexes.len(), 0);
-        assert_eq!(g.edges.shape(), (0, 0));
+        assert_eq!(g.adjacency.shape(), (0, 0));
     }
 
     #[test]
@@ -258,8 +263,8 @@ mod tests {
         assert_eq!(idx, 0);
         let g = builder.build();
         assert_eq!(g.vertexes, vec![123]);
-        assert_eq!(g.edges.shape(), (1, 1));
-        assert_eq!(g.edges[(0, 0)], 0);
+        assert_eq!(g.adjacency.shape(), (1, 1));
+        assert_eq!(g.adjacency[(0, 0)], 0);
     }
 
     // New tests
@@ -318,10 +323,11 @@ mod tests {
         assert_eq!(g.degrees[(0, 0)], (99 + 1 + 2) + (99 + 3));
         assert_eq!(g.degrees[(1, 1)], 3 + (1 + 2));
 
-        // Edge matrix stores last assignment for 0->1 at (to, from) = (1, 0)
-        assert_eq!(g.edges[(1, 0)], 2);
+        // Adjacency is symmetric; the last assignment between 0 and 1 was 1->0 with weight 3
+        assert_eq!(g.adjacency[(1, 0)], 3);
+        assert_eq!(g.adjacency[(0, 1)], 3);
         // Self-loop should be present
-        assert_eq!(g.edges[(0, 0)], 99);
+        assert_eq!(g.adjacency[(0, 0)], 99);
     }
 
     #[test]
@@ -356,9 +362,9 @@ mod tests {
         builder.add_vertex(2);
         builder.add_edge(0, 1, 2.5);
         let g = builder.build();
-        assert_eq!(g.edges.shape(), (2, 2));
+        assert_eq!(g.adjacency.shape(), (2, 2));
         // edges matrix stores at (to, from)
-        assert_eq!(g.edges[(1, 0)], 2.5_f64);
+        assert_eq!(g.adjacency[(1, 0)], 2.5_f64);
 
         // Degree entries are weighted by edge values (f64)
         assert_eq!(g.outgoing_degrees[(0, 0)], 2.5);
