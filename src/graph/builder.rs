@@ -9,20 +9,13 @@ use std::hash::Hash;
 /// * `vertices` - A vector storing the values of vertices to be added to the graph.
 /// * `edges` - A vector of tuples representing edges as (from_index, to_index, value).
 #[derive(Default)]
-pub struct GraphBuilder<
-    T: Eq + Hash + Clone,
-    V: num_traits::identities::Zero + Copy + nalgebra::Scalar,
-> {
+pub struct GraphBuilder<T, V> {
     pub(crate) vertices: Vec<T>,
     pub(crate) edges: Vec<(usize, usize, V)>,
     pub(crate) index_map: HashMap<T, usize>,
 }
 
-impl<
-    T: Eq + Hash + Clone,
-    V: num_traits::identities::Zero + Copy + num_traits::identities::One + nalgebra::Scalar,
-> GraphBuilder<T, V>
-{
+impl<T: Eq + Hash + Clone, V> GraphBuilder<T, V> {
     /// Creates a new, empty `GraphBuilder`.
     ///
     /// # Returns

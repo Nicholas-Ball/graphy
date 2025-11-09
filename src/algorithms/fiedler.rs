@@ -8,7 +8,6 @@ use nalgebra::SymmetricEigen;
 
 use crate::graph::Graph;
 
-/// Implementation for spectral graph analysis for graphs with scalar edge weights of type V.
 impl<
     T: Eq + Clone + Hash,
     V: Add

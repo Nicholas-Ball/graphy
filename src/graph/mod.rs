@@ -1,10 +1,8 @@
 pub mod builder;
+pub mod edge;
+pub mod vertex;
 
 use std::collections::HashMap;
-use std::fmt::Debug;
-use std::hash::Hash;
-
-use nalgebra::Scalar;
 
 /// Represents a graph with vertex values of type `T` and edge values of type `V`.
 ///
@@ -16,7 +14,7 @@ use nalgebra::Scalar;
 /// * `index_map` - Maps vertex values to their internal contiguous indices.
 /// edges: symmetric adjacency matrix (undirected)
 /// adjacency_directed: asymmetric adjacency matrix (directed)
-pub struct Graph<T: Eq + Hash + Clone, V: Copy + num_traits::identities::Zero + nalgebra::Scalar> {
+pub struct Graph<T, V> {
     pub vertices: Vec<T>,
     pub adjacency_undirectional: nalgebra::DMatrix<V>,
     pub adjacency_directional: nalgebra::DMatrix<V>,
@@ -26,45 +24,7 @@ pub struct Graph<T: Eq + Hash + Clone, V: Copy + num_traits::identities::Zero + 
     pub index_map: HashMap<T, usize>,
 }
 
-impl<T: Eq + Hash + Clone, V: Copy + Debug + Scalar + num_traits::Zero> Graph<T, V> {
-    /// Returns the value of the edge from one vertex to another.
-    ///
-    /// # Arguments
-    ///
-    /// * `from` - Reference to the value of the source vertex.
-    /// * `to` - Reference to the value of the destination vertex.
-    ///
-    /// # Returns
-    ///
-    /// The value of the edge from `from` to `to`.
-    pub fn get_edge_value(&self, from: &T, to: &T) -> V {
-        let idx = (
-            *self.index_map.get(to).expect("Unknown 'to' vertex value."),
-            *self
-                .index_map
-                .get(from)
-                .expect("Unknown 'from' vertex value."),
-        );
-
-        self.adjacency_undirectional[idx]
-    }
-
-    /// Returns the value of the edge between two vertices, if both vertices exist.
-    ///
-    /// # Arguments
-    ///
-    /// * `from` - Reference to the value of the source vertex.
-    /// * `to` - Reference to the value of the destination vertex.
-    ///
-    /// # Returns
-    ///
-    /// Some(weight) if both vertices exist, otherwise None.
-    pub fn get_edge_value_by_vertices(&self, from: &T, to: &T) -> Option<V> {
-        let from_idx = self.index_map.get(from)?;
-        let to_idx = self.index_map.get(to)?;
-        Some(self.adjacency_undirectional[(*to_idx, *from_idx)])
-    }
-
+impl<T, V> Graph<T, V> {
     /// Returns the number of vertices in the graph.
     ///
     /// # Returns
@@ -72,41 +32,6 @@ impl<T: Eq + Hash + Clone, V: Copy + Debug + Scalar + num_traits::Zero> Graph<T,
     /// The number of vertices (rank) in the graph.
     pub fn get_rank(&self) -> usize {
         self.vertices.len()
-    }
-
-    /// Returns a reference to the value of a vertex by its index.
-    ///
-    /// # Arguments
-    ///
-    /// * `index` - The index of the vertex.
-    ///
-    /// # Returns
-    ///
-    /// A reference to the value of the vertex at the given index.
-    pub fn get_vertex_value(&self, index: usize) -> &T {
-        &self.vertices[index]
-    }
-
-    /// Returns the internal index of a vertex value, if present.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - Reference to the value of the vertex.
-    ///
-    /// # Returns
-    ///
-    /// Some(index) if the vertex exists, otherwise None.
-    pub fn get_vertex_index(&self, value: &T) -> Option<usize> {
-        self.index_map.get(value).copied()
-    }
-
-    /// Returns a reference to the vector of all vertex values in the graph.
-    ///
-    /// # Returns
-    ///
-    /// Reference to the vector of vertex values.
-    pub fn get_vertices(&self) -> &Vec<T> {
-        &self.vertices
     }
 }
 
