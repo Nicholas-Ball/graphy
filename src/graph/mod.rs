@@ -1,3 +1,5 @@
+pub mod builder;
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -16,141 +18,21 @@ use nalgebra::Scalar;
 /// adjacency_directed: asymmetric adjacency matrix (directed)
 pub struct Graph<T: Eq + Hash + Clone, V: Copy + num_traits::identities::Zero + nalgebra::Scalar> {
     pub vertices: Vec<T>,
-    pub adjacency: nalgebra::DMatrix<V>,
+    pub adjacency_undirectional: nalgebra::DMatrix<V>,
+    pub adjacency_directional: nalgebra::DMatrix<V>,
     pub degrees: nalgebra::DMatrix<V>,
     pub incoming_degrees: nalgebra::DMatrix<V>,
     pub outgoing_degrees: nalgebra::DMatrix<V>,
     pub index_map: HashMap<T, usize>,
 }
 
-/// A builder for constructing a `Graph`.
-///
-/// # Fields
-///
-/// * `vertices` - A vector storing the values of vertices to be added to the graph.
-/// * `edges` - A vector of tuples representing edges as (from_index, to_index, value).
-#[derive(Default)]
-pub struct GraphBuilder<
-    T: Eq + Hash + Clone,
-    V: num_traits::identities::Zero + Copy + nalgebra::Scalar,
-> {
-    vertices: Vec<T>,
-    edges: Vec<(usize, usize, V)>,
-    index_map: HashMap<T, usize>,
-}
-
-impl<
-    T: Eq + Hash + Clone,
-    V: num_traits::identities::Zero + Copy + num_traits::identities::One + nalgebra::Scalar,
-> GraphBuilder<T, V>
-{
-    /// Creates a new, empty `GraphBuilder`.
-    ///
-    /// # Returns
-    ///
-    /// A new instance of `GraphBuilder` with no vertices or edges.
-    pub fn new() -> Self {
-        Self {
-            vertices: Vec::new(),
-            edges: Vec::new(),
-            index_map: HashMap::new(),
-        }
-    }
-
-    /// Adds a vertex to the graph.
-    ///
-    /// # Arguments
-    ///
-    /// * `value` - The value to assign to the new vertex.
-    ///
-    /// # Returns
-    ///
-    /// The builder (for chaining).
-    ///
-    /// Note: If the vertex value already exists it will NOT create a duplicate; the existing
-    /// index is retained (idempotent insertion). This keeps T independent of positional indices.
-    pub fn add_vertex(&mut self, value: T) -> &mut Self {
-        if !self.index_map.contains_key(&value) {
-            let idx = self.vertices.len();
-            self.vertices.push(value.clone());
-            self.index_map.insert(value, idx);
-        }
-        self
-    }
-
-    /// Adds an edge by vertex values `from_val` -> `to_val` with a specified weight.
-    ///
-    /// If either endpoint does not yet exist, it is inserted automatically.
-    pub fn add_edge(&mut self, from_val: T, to_val: T, value: V) -> &mut Self {
-        // Ensure vertices exist (idempotent).
-        let from_idx = self.get_or_insert_index(from_val);
-        let to_idx = self.get_or_insert_index(to_val);
-        self.edges.push((from_idx, to_idx, value));
-        self
-    }
-
-    /// Adds an edge by borrowing vertex values; vertices must already exist.
-    pub fn add_edge_ref(&mut self, from: &T, to: &T, value: V) -> &mut Self {
-        if let (Some(&from_idx), Some(&to_idx)) = (self.index_map.get(from), self.index_map.get(to))
-        {
-            self.edges.push((from_idx, to_idx, value));
-        } else {
-            panic!("Attempted to add_edge_ref with unknown vertex value(s).");
-        }
-        self
-    }
-
-    fn get_or_insert_index(&mut self, v: T) -> usize {
-        if let Some(&idx) = self.index_map.get(&v) {
-            idx
-        } else {
-            let idx = self.vertices.len();
-            self.vertices.push(v.clone());
-            self.index_map.insert(v, idx);
-            idx
-        }
-    }
-
-    pub fn build(self) -> Graph<T, V>
-    where
-        V: nalgebra::Scalar + num_traits::Zero + num_traits::One + Copy + std::ops::AddAssign,
-    {
-        let n = self.vertices.len();
-        let mut adjacency_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-        let mut degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-        let mut incoming_degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-        let mut outgoing_degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-
-        for (from, to, value) in self.edges.iter() {
-            // Store directed edge weight at (to, from)
-            adjacency_matrix[(*to, *from)] = *value;
-            adjacency_matrix[(*from, *to)] = *value;
-
-            // Update weighted degrees
-            outgoing_degree_matrix[(*from, *from)] += *value;
-            incoming_degree_matrix[(*to, *to)] += *value;
-            degree_matrix[(*from, *from)] += *value;
-            degree_matrix[(*to, *to)] += *value;
-        }
-
-        Graph {
-            vertices: self.vertices,
-            adjacency: adjacency_matrix,
-            degrees: degree_matrix,
-            incoming_degrees: incoming_degree_matrix,
-            outgoing_degrees: outgoing_degree_matrix,
-            index_map: self.index_map,
-        }
-    }
-}
-
 impl<T: Eq + Hash + Clone, V: Copy + Debug + Scalar + num_traits::Zero> Graph<T, V> {
-    /// Retrieves the value of the edge from one vertex index to another.
+    /// Returns the value of the edge from one vertex to another.
     ///
     /// # Arguments
     ///
-    /// * `from` - The index of the source vertex.
-    /// * `to` - The index of the destination vertex.
+    /// * `from` - Reference to the value of the source vertex.
+    /// * `to` - Reference to the value of the destination vertex.
     ///
     /// # Returns
     ///
@@ -164,16 +46,23 @@ impl<T: Eq + Hash + Clone, V: Copy + Debug + Scalar + num_traits::Zero> Graph<T,
                 .expect("Unknown 'from' vertex value."),
         );
 
-        self.adjacency[idx]
+        self.adjacency_undirectional[idx]
     }
 
-    /// Retrieves the edge value using vertex values instead of indices.
+    /// Returns the value of the edge between two vertices, if both vertices exist.
     ///
-    /// Returns Some(weight) if both vertices exist, otherwise None.
+    /// # Arguments
+    ///
+    /// * `from` - Reference to the value of the source vertex.
+    /// * `to` - Reference to the value of the destination vertex.
+    ///
+    /// # Returns
+    ///
+    /// Some(weight) if both vertices exist, otherwise None.
     pub fn get_edge_value_by_vertices(&self, from: &T, to: &T) -> Option<V> {
         let from_idx = self.index_map.get(from)?;
         let to_idx = self.index_map.get(to)?;
-        Some(self.adjacency[(*to_idx, *from_idx)])
+        Some(self.adjacency_undirectional[(*to_idx, *from_idx)])
     }
 
     /// Returns the number of vertices in the graph.
@@ -185,7 +74,7 @@ impl<T: Eq + Hash + Clone, V: Copy + Debug + Scalar + num_traits::Zero> Graph<T,
         self.vertices.len()
     }
 
-    /// Retrieves a reference to the value of a vertex by its index.
+    /// Returns a reference to the value of a vertex by its index.
     ///
     /// # Arguments
     ///
@@ -199,10 +88,23 @@ impl<T: Eq + Hash + Clone, V: Copy + Debug + Scalar + num_traits::Zero> Graph<T,
     }
 
     /// Returns the internal index of a vertex value, if present.
+    ///
+    /// # Arguments
+    ///
+    /// * `value` - Reference to the value of the vertex.
+    ///
+    /// # Returns
+    ///
+    /// Some(index) if the vertex exists, otherwise None.
     pub fn get_vertex_index(&self, value: &T) -> Option<usize> {
         self.index_map.get(value).copied()
     }
 
+    /// Returns a reference to the vector of all vertex values in the graph.
+    ///
+    /// # Returns
+    ///
+    /// Reference to the vector of vertex values.
     pub fn get_vertices(&self) -> &Vec<T> {
         &self.vertices
     }
@@ -211,6 +113,7 @@ impl<T: Eq + Hash + Clone, V: Copy + Debug + Scalar + num_traits::Zero> Graph<T,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::builder::GraphBuilder;
     use num_traits::identities::Zero;
 
     #[test]
@@ -224,11 +127,11 @@ mod tests {
         assert_eq!(idx2, 1);
         let g = builder.build();
         assert_eq!(g.vertices, vec![42, 99]);
-        assert_eq!(g.adjacency.shape(), (2, 2));
-        assert_eq!(g.adjacency[(0, 0)], 0);
-        assert_eq!(g.adjacency[(0, 1)], 0);
-        assert_eq!(g.adjacency[(1, 0)], 0);
-        assert_eq!(g.adjacency[(1, 1)], 0);
+        assert_eq!(g.adjacency_undirectional.shape(), (2, 2));
+        assert_eq!(g.adjacency_undirectional[(0, 0)], 0);
+        assert_eq!(g.adjacency_undirectional[(0, 1)], 0);
+        assert_eq!(g.adjacency_undirectional[(1, 0)], 0);
+        assert_eq!(g.adjacency_undirectional[(1, 1)], 0);
     }
 
     #[test]
@@ -245,19 +148,19 @@ mod tests {
         builder.add_edge(c, a, 30);
         let g = builder.build();
         assert_eq!(g.vertices, vec![0, 1, 2]);
-        assert_eq!(g.adjacency.shape(), (3, 3));
+        assert_eq!(g.adjacency_undirectional.shape(), (3, 3));
 
         let ai = g.get_vertex_index(&a).unwrap();
         let bi = g.get_vertex_index(&b).unwrap();
         let ci = g.get_vertex_index(&c).unwrap();
 
         // adjacency is symmetric: store at both (to, from) and (from, to)
-        assert_eq!(g.adjacency[(bi, ai)], 10);
-        assert_eq!(g.adjacency[(ai, bi)], 10);
-        assert_eq!(g.adjacency[(ci, bi)], 20);
-        assert_eq!(g.adjacency[(bi, ci)], 20);
-        assert_eq!(g.adjacency[(ai, ci)], 30);
-        assert_eq!(g.adjacency[(ci, ai)], 30);
+        assert_eq!(g.adjacency_undirectional[(bi, ai)], 10);
+        assert_eq!(g.adjacency_undirectional[(ai, bi)], 10);
+        assert_eq!(g.adjacency_undirectional[(ci, bi)], 20);
+        assert_eq!(g.adjacency_undirectional[(bi, ci)], 20);
+        assert_eq!(g.adjacency_undirectional[(ai, ci)], 30);
+        assert_eq!(g.adjacency_undirectional[(ci, ai)], 30);
 
         // Check unset edges are zero
         for i in 0..3 {
@@ -270,7 +173,7 @@ mod tests {
                     || (i == ci && j == ai);
                 if !is_edge {
                     assert_eq!(
-                        g.adjacency[(i, j)],
+                        g.adjacency_undirectional[(i, j)],
                         i32::zero(),
                         "Expected zero at ({}, {})",
                         i,
@@ -294,7 +197,7 @@ mod tests {
         let ui = g.get_vertex_index(&u).unwrap();
         let vi = g.get_vertex_index(&v).unwrap();
         // edges matrix stores at (to, from)
-        assert_eq!(g.adjacency[(vi, ui)], 2);
+        assert_eq!(g.adjacency_undirectional[(vi, ui)], 2);
     }
 
     #[test]
@@ -302,7 +205,7 @@ mod tests {
         let builder = GraphBuilder::<i32, i32>::new();
         let g = builder.build();
         assert_eq!(g.vertices.len(), 0);
-        assert_eq!(g.adjacency.shape(), (0, 0));
+        assert_eq!(g.adjacency_undirectional.shape(), (0, 0));
     }
 
     #[test]
@@ -337,8 +240,8 @@ mod tests {
         assert_eq!(idx, 0);
         let g = builder.build();
         assert_eq!(g.vertices, vec![123]);
-        assert_eq!(g.adjacency.shape(), (1, 1));
-        assert_eq!(g.adjacency[(0, 0)], 0);
+        assert_eq!(g.adjacency_undirectional.shape(), (1, 1));
+        assert_eq!(g.adjacency_undirectional[(0, 0)], 0);
     }
 
     // New tests
@@ -455,10 +358,10 @@ mod tests {
         assert_eq!(g.degrees[(i1, i1)], 3 + (1 + 2));
 
         // Adjacency is symmetric; the last assignment between 0 and 1 was 1->0 with weight 3
-        assert_eq!(g.adjacency[(i1, i0)], 3);
-        assert_eq!(g.adjacency[(i0, i1)], 3);
+        assert_eq!(g.adjacency_undirectional[(i1, i0)], 3);
+        assert_eq!(g.adjacency_undirectional[(i0, i1)], 3);
         // Self-loop should be present
-        assert_eq!(g.adjacency[(i0, i0)], 99);
+        assert_eq!(g.adjacency_undirectional[(i0, i0)], 99);
     }
 
     #[test]
@@ -493,11 +396,11 @@ mod tests {
         builder.add_vertex(1);
         builder.add_edge(0, 1, 2.5);
         let g = builder.build();
-        assert_eq!(g.adjacency.shape(), (2, 2));
+        assert_eq!(g.adjacency_undirectional.shape(), (2, 2));
         let i0 = g.get_vertex_index(&0).unwrap();
         let i1 = g.get_vertex_index(&1).unwrap();
         // edges matrix stores at (to, from)
-        assert_eq!(g.adjacency[(i1, i0)], 2.5_f64);
+        assert_eq!(g.adjacency_undirectional[(i1, i0)], 2.5_f64);
 
         // Degree entries are weighted by edge values (f64)
         assert_eq!(g.outgoing_degrees[(i0, i0)], 2.5);
@@ -614,9 +517,9 @@ mod tests {
         let a_idx = g.get_vertex_index(&"A").unwrap();
         let b_idx = g.get_vertex_index(&"B").unwrap();
         let c_idx = g.get_vertex_index(&"C").unwrap();
-        assert_eq!(g.adjacency[(b_idx, a_idx)], 11);
-        assert_eq!(g.adjacency[(a_idx, b_idx)], 11);
-        assert_eq!(g.adjacency[(c_idx, a_idx)], 7);
+        assert_eq!(g.adjacency_undirectional[(b_idx, a_idx)], 11);
+        assert_eq!(g.adjacency_undirectional[(a_idx, b_idx)], 11);
+        assert_eq!(g.adjacency_undirectional[(c_idx, a_idx)], 7);
         assert_eq!(g.get_edge_value_by_vertices(&"A", &"B").unwrap(), 11);
         assert_eq!(g.get_edge_value_by_vertices(&"C", &"A").unwrap(), 7);
     }
