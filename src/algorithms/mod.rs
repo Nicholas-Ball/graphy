@@ -1,6 +1,7 @@
 pub mod cheeger;
 pub mod fiedler;
 pub mod floyd_warshall;
+pub mod hoffman_delsarte;
 
 use std::{fmt::Debug, hash::Hash};
 
