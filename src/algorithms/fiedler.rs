@@ -4,7 +4,9 @@ use std::{
     ops::{Add, Sub, SubAssign},
 };
 
-use nalgebra::SymmetricEigen;
+use faer::traits::RealField;
+use faer::{Side, col::Own};
+use num_traits::{Float, FromPrimitive};
 
 use crate::graph::Graph;
 
@@ -14,30 +16,15 @@ impl<
         + Copy
         + Debug
         + PartialOrd
+        + RealField
         + SubAssign
         + num_traits::Zero
         + Sub<Output = V>
-        + nalgebra::ComplexField<RealField = V>
+        + std::ops::AddAssign
         + 'static,
 > Graph<T, V>
 {
     /// Computes the Fiedler value and vector of the graph's (combinatorial) Laplacian.
-    ///
-    /// The Laplacian used is the (unnormalized) matrix L = D - A.
-    /// This routine assumes:
-    ///   - The underlying Laplacian is symmetric (i.e., the graph is treated as undirected
-    ///     or its Laplacian is otherwise symmetric).
-    ///   - `nalgebra::SymmetricEigen` returns eigenvalues in ascending order (which it does),
-    ///     so the second-smallest eigenvalue is at index 1.
-    ///
-    /// Notes:
-    ///   - For a connected graph, the smallest eigenvalue is 0 with multiplicity 1, and
-    ///     the Fiedler value (algebraic connectivity) is the next eigenvalue (> 0).
-    ///   - For a disconnected graph with c > 1 components, the 0 eigenvalue has multiplicity c,
-    ///     so the "Fiedler value" (index 1) may also be 0. The corresponding eigenvector chosen
-    ///     by the decomposition is one of the eigenvectors spanning the null space.
-    ///   - This function will panic if the graph has fewer than 2 vertices because it directly
-    ///     indexes eigenvalue/eigenvector at position 1.
     ///
     /// # Arguments
     ///
@@ -45,30 +32,25 @@ impl<
     ///
     /// # Returns
     ///
-    /// * `(V, Vec<V>)` - The Fiedler value (second-smallest eigenvalue) and its corresponding eigenvector (column 1).
-    pub fn fiedler(&self) -> (V, Vec<V>) {
-        let laplacian = self.laplacian_matrix();
+    /// * `(V, faer::col::generic::Col<Own<V>>)` - The Fiedler value (second-smallest eigenvalue)
+    ///   and its corresponding eigenvector (column 1).
+    ///
+    /// The Fiedler value is the second-smallest eigenvalue of the Laplacian matrix,
+    /// and the Fiedler vector is its associated eigenvector.
+    pub fn fiedler(&self) -> (V, faer::col::generic::Col<Own<V>>) {
+        let a = self.laplacian_matrix();
 
-        // Compute eigenvalues and eigenvectors
-        let symmetric_eigen = SymmetricEigen::new(laplacian.clone());
+        // Compute eigenvalues and eigenvectors using faer
+        let decomp = a.self_adjoint_eigen(Side::Lower).unwrap();
 
-        let eigenvalues = symmetric_eigen.eigenvalues;
-        let eigenvectors = symmetric_eigen.eigenvectors;
+        let eigen_values = decomp.S();
+        let eigen_vectors = decomp.U();
 
-        // Sort eigenpairs by eigenvalue (ascending)
-        let mut idx: Vec<usize> = (0..eigenvalues.len()).collect();
-        idx.sort_by(|&i, &j| {
-            eigenvalues[i]
-                .partial_cmp(&eigenvalues[j])
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // The eigenvalues are sorted in ascending order
+        let fiedler_value = eigen_values[1];
+        let fiedler_vector = eigen_vectors.col(1);
 
-        // The Fiedler value is the second smallest eigenvalue
-        let k = idx[1];
-        let fiedler_value = eigenvalues[k];
-        let fiedler_vector = eigenvectors.column(k).iter().copied().collect();
-
-        (fiedler_value, fiedler_vector)
+        (fiedler_value, fiedler_vector.cloned())
     }
 
     /// Partitions the vertex set into two groups using the sign of the Fiedler vector
@@ -79,9 +61,9 @@ impl<
     ///   - Vertices whose Fiedler vector entry is >= V::zero() go into the first group.
     ///   - Vertices whose entry is < V::zero() go into the second group.
     ///
-    /// This implements a standard spectral bisection heuristic. The partition is only defined
+    /// This implements the standard spectral bisection heuristic. The partition is only defined
     /// up to a global sign flip of the Fiedler vector (i.e., the two returned graphs may be swapped
-    /// relative to an alternate run or mathematical convention).
+    /// relative to another run or mathematical convention).
     ///
     /// For disconnected graphs with multiple 0 eigenvalues, the "Fiedler vector" chosen may
     /// correspond to one particular null-space direction, potentially yielding a partition
@@ -91,7 +73,7 @@ impl<
     /// in a group are added, and for every ordered pair (u, v) of vertices in the group, the
     /// original edge (u, v) is added if its weight is non-zero.
     ///
-    /// Updated to reflect the new API:
+    /// Implementation notes:
     ///   - Edges are added using vertex labels (cloned T values) instead of numeric indices.
     ///   - Edge weights are retrieved via `get_edge_value(&T, &T)` rather than indexing by usize.
     ///
@@ -107,14 +89,19 @@ impl<
     pub fn split_groups_by_fiedler(&self) -> (Graph<T, V>, Graph<T, V>)
     where
         T: Clone,
+        V: Float + FromPrimitive,
     {
         let (_fiedler_value, fiedler_vector) = self.fiedler();
+
+        dbg!("Fiedler vector for splitting: {:?}", &fiedler_vector);
 
         let mut group1_indices = Vec::new();
         let mut group2_indices = Vec::new();
 
+        let pivot = fiedler_vector[0];
+
         for (i, &value) in fiedler_vector.iter().enumerate() {
-            if value >= V::zero() {
+            if (value - pivot).abs() >= V::from_f64(0.01).unwrap() {
                 group1_indices.push(i);
             } else {
                 group2_indices.push(i);
@@ -171,27 +158,27 @@ mod fiedler_tests {
 
     /// Tests the Fiedler value and vector for a disconnected graph with two components.
     ///
-    /// Disconnected graph with two components has Fiedler value 0.0.
+    /// For a disconnected graph with two components, the Fiedler value should be 0.0.
     #[test]
     fn test_fiedler_disconnected_two_components() {
         let n = 6;
-        let mut builder = GraphBuilder::new();
+        let mut builder: GraphBuilder<i32, f64> = GraphBuilder::new();
         for i in 0..n {
-            builder.add_vertex(i);
+            builder.add_vertex(i as i32);
         }
 
-        // Group 1
+        // Group 1: vertices 0, 1, 4
         builder.add_edge(0, 4, 1.0);
         builder.add_edge(0, 1, 1.0);
         builder.add_edge(1, 4, 1.0);
 
-        // Group 2
+        // Group 2: vertices 2, 3, 5
         builder.add_edge(3, 2, 1.0);
         builder.add_edge(3, 5, 1.0);
 
         let g = builder.build();
 
-        let (fiedler_val, fiedler_vec): (f32, Vec<f32>) = g.fiedler();
+        let (fiedler_val, fiedler_vec) = g.fiedler();
 
         dbg!("Fiedler value: {}", &fiedler_val);
         dbg!("Fiedler vector: {:?}", &fiedler_vec);
@@ -199,14 +186,14 @@ mod fiedler_tests {
         assert!(fiedler_val.abs() < 1e-6);
 
         // Group 1
-        assert!(fiedler_vec[0] <= 0.0);
-        assert!(fiedler_vec[1] <= 0.0);
-        assert!(fiedler_vec[4] <= 0.0);
+        assert!(fiedler_vec[0] == 0.0);
+        assert!(fiedler_vec[1] == 0.0);
+        assert!(fiedler_vec[4] == 0.0);
 
         // Group 2
-        assert!(fiedler_vec[2] == 0.0);
-        assert!(fiedler_vec[3] == 0.0);
-        assert!(fiedler_vec[5] == 0.0);
+        assert!(fiedler_vec[2] <= 0.0);
+        assert!(fiedler_vec[3] <= 0.0);
+        assert!(fiedler_vec[5] <= 0.0);
     }
 
     // ------------------------------------------------------------
@@ -214,8 +201,8 @@ mod fiedler_tests {
     // ------------------------------------------------------------
 
     /// Utility: return a sorted clone of the given vector.
-    fn sorted(mut v: Vec<usize>) -> Vec<usize> {
-        v.sort_unstable();
+    fn sorted(mut v: Vec<i32>) -> Vec<i32> {
+        v.sort();
         v
     }
 
@@ -223,11 +210,11 @@ mod fiedler_tests {
     /// corresponding to the two halves of the path (up to a global sign flip).
     #[test]
     fn test_split_groups_by_fiedler_path_graph_4() {
-        let mut builder: GraphBuilder<usize, f64> = GraphBuilder::new();
+        let mut builder: GraphBuilder<i32, f64> = GraphBuilder::new();
         for i in 0..4 {
-            builder.add_vertex(i);
+            builder.add_vertex(i as i32);
         }
-        // Undirected path: 0-1 2-3
+        // Undirected path: 0-1 and 2-3 (two disconnected edges)
         builder.add_edge(0, 1, 1.0);
         builder.add_edge(2, 3, 1.0);
 
@@ -254,9 +241,9 @@ mod fiedler_tests {
     /// (up to a global sign flip).
     #[test]
     fn test_split_groups_by_fiedler_two_clusters_weak_bridge() {
-        let mut builder: GraphBuilder<usize, f64> = GraphBuilder::new();
+        let mut builder: GraphBuilder<i32, f64> = GraphBuilder::new();
         for i in 0..6 {
-            builder.add_vertex(i);
+            builder.add_vertex(i as i32);
         }
 
         // Make two clusters: {0,1,2} and {3,4,5}

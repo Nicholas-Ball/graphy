@@ -1,3 +1,5 @@
+use faer::traits::ComplexField;
+
 use crate::graph::Graph;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -123,20 +125,25 @@ impl<T: Eq + Hash + Clone, V> GraphBuilder<T, V> {
     /// * `Graph<T, V>` - The constructed graph with all vertices and edges added.
     pub fn build(self) -> Graph<T, V>
     where
-        V: nalgebra::Scalar + num_traits::Zero + num_traits::One + Copy + std::ops::AddAssign,
+        V: num_traits::Zero
+            + num_traits::One
+            + Copy
+            + std::ops::AddAssign
+            + faer::traits::RealField,
     {
         let n = self.vertices.len();
-        let mut adjacency_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-        let mut directed_adjacency_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-        let mut degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-        let mut incoming_degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
-        let mut outgoing_degree_matrix = nalgebra::DMatrix::<V>::zeros(n, n);
+        let mut adjacency_matrix = faer::Mat::<V>::zeros(n, n);
+        let mut directed_adjacency_matrix = faer::Mat::<V>::zeros(n, n);
+        let mut degree_matrix = faer::Mat::<V>::zeros(n, n);
+        let mut incoming_degree_matrix = faer::Mat::<V>::zeros(n, n);
+        let mut outgoing_degree_matrix = faer::Mat::<V>::zeros(n, n);
 
         for (from, to, value) in self.edges.iter() {
-            // Store directed edge weight at (to, from)
+            // Undirected adjacency (symmetric)
             adjacency_matrix[(*to, *from)] = *value;
             adjacency_matrix[(*from, *to)] = *value;
 
+            // Directed adjacency
             directed_adjacency_matrix[(*from, *to)] = *value;
 
             // Update weighted degrees

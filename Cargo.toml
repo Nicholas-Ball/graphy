@@ -5,5 +5,28 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-nalgebra = "0.34.1"
+faer = {version = "0.23.2", features = ["nightly"]}
 num-traits = "0.2.19"
+
+pulp = "0.21.5"
+# Force-enable AVX-512 impls for arch SIMD types like __m512
+bytemuck = { version = "1.24", features = ["avx512_simd"] }
+
+
+[features]
+
+[dev-dependencies]
+criterion = "0.7.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+incremental = false
+debug = false
+
+[[bench]]
+name = "benchmark"
+harness = false

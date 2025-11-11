@@ -2,6 +2,8 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{Add, Sub, SubAssign};
 
+use num_traits::FromPrimitive;
+
 use crate::graph::Graph;
 
 impl<
@@ -13,7 +15,8 @@ impl<
         + SubAssign
         + num_traits::Zero
         + Sub<Output = V>
-        + nalgebra::ComplexField<RealField = V>
+        + faer::traits::RealField
+        + FromPrimitive
         + Ord
         + 'static,
 > Graph<T, V>
@@ -31,8 +34,11 @@ impl<
     ///
     /// Returns a value of type `V` representing the Hoffman-Delsarte bound for the graph.
     pub fn hoffman_delsarte_bound(&self) -> V {
-        let eigenvalues = self.laplacian_matrix().normalize().symmetric_eigenvalues();
-        let lambda_max = eigenvalues.max();
+        let eigenvalues = self
+            .laplacian_matrix()
+            .self_adjoint_eigen(faer::Side::Lower)
+            .unwrap();
+        let lambda_max = eigenvalues.S()[self.get_rank() - 1];
 
         let max_degree = self
             .adjacency_undirectional

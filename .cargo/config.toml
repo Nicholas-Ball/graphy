@@ -1,0 +1,6 @@
+[build]
+channel = "nightly"
+rustflags = [
+    "-C", "target-cpu=native",
+    "-C", "force-frame-pointers=no"
+]

@@ -1,3 +1,5 @@
+use num_traits::{Float, FromPrimitive};
+
 use super::Graph;
 pub use std::fmt::Debug;
 use std::hash::Hash;
@@ -12,7 +14,10 @@ impl<
         + SubAssign
         + num_traits::Zero
         + Sub<Output = V>
-        + nalgebra::ComplexField<RealField = V>
+        + faer::traits::RealField
+        + std::ops::AddAssign
+        + Float
+        + FromPrimitive
         + 'static,
 > Graph<T, V>
 {

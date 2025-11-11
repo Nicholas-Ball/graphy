@@ -1,12 +1,13 @@
 use crate::graph::Graph;
-use nalgebra::DMatrix;
+use faer::mat::Mat;
+use faer::traits::RealField;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::ops::{Sub, SubAssign};
 
 impl<
     T: Eq + Clone + Hash,
-    V: Debug + PartialEq + Copy + num_traits::Zero + Sub<Output = V> + SubAssign + 'static,
+    V: Debug + PartialEq + Copy + num_traits::Zero + Sub<Output = V> + SubAssign + RealField + 'static,
 > Graph<T, V>
 {
     /// Computes the Laplacian matrix of the graph.
@@ -17,13 +18,19 @@ impl<
     ///
     /// # Returns
     ///
-    /// * `DMatrix<V>` - The Laplacian matrix as a 2D array where each entry represents the difference between the degree matrix and the adjacency matrix.
-    pub fn laplacian_matrix(&self) -> DMatrix<V> {
+    /// * `Mat<V>` - The Laplacian matrix as a 2D array where each entry represents the difference between the degree matrix and the adjacency matrix.
+    pub fn laplacian_matrix(&self) -> Mat<V> {
         let a = self.adjacency_matrix();
         let d = self.degree_matrix();
 
-        // Laplacian L = D - A (element-wise)
-        let l = d - a;
+        let (nrows, ncols) = (d.nrows(), d.ncols());
+        let mut l = Mat::zeros(nrows, ncols);
+
+        for i in 0..nrows {
+            for j in 0..ncols {
+                l[(i, j)] = d[(i, j)] - a[(i, j)];
+            }
+        }
 
         l
     }
@@ -36,13 +43,19 @@ impl<
     ///
     /// # Returns
     ///
-    /// * `DMatrix<V>` - The out-Laplacian matrix as a 2D array where each entry represents the difference between the out-degree matrix and the adjacency matrix.
-    pub fn laplacian_matrix_out(&self) -> DMatrix<V> {
-        let a: &DMatrix<V> = self.adjacency_matrix_directed();
+    /// * `Mat<V>` - The out-Laplacian matrix as a 2D array where each entry represents the difference between the out-degree matrix and the adjacency matrix.
+    pub fn laplacian_matrix_out(&self) -> Mat<V> {
+        let a = self.adjacency_matrix_directed();
         let d = self.degree_matrix_out();
 
-        // Out-Laplacian L_out = D_out - A (element-wise)
-        let l = d - a;
+        let (nrows, ncols) = (d.nrows(), d.ncols());
+        let mut l = Mat::zeros(nrows, ncols);
+
+        for i in 0..nrows {
+            for j in 0..ncols {
+                l[(i, j)] = d[(i, j)] - a[(i, j)];
+            }
+        }
 
         l
     }
@@ -55,16 +68,22 @@ impl<
     ///
     /// # Returns
     ///
-    /// * `DMatrix<V>` - The in-Laplacian matrix as a 2D array where each entry represents the difference between the in-degree matrix and the adjacency matrix.
-    pub fn laplacian_matrix_in(&self) -> DMatrix<V>
+    /// * `Mat<V>` - The in-Laplacian matrix as a 2D array where each entry represents the difference between the in-degree matrix and the adjacency matrix.
+    pub fn laplacian_matrix_in(&self) -> Mat<V>
     where
         V: std::ops::Sub<Output = V>,
     {
-        let a: &DMatrix<V> = self.adjacency_matrix_directed();
+        let a = self.adjacency_matrix_directed();
         let d = self.degree_matrix_in();
 
-        // In-Laplacian L_in = D_in - A (element-wise)
-        let l = d - a;
+        let (nrows, ncols) = (d.nrows(), d.ncols());
+        let mut l = Mat::zeros(nrows, ncols);
+
+        for i in 0..nrows {
+            for j in 0..ncols {
+                l[(i, j)] = d[(i, j)] - a[(i, j)];
+            }
+        }
 
         l
     }
@@ -73,30 +92,69 @@ impl<
 #[cfg(test)]
 mod tests {
     use crate::graph::builder::GraphBuilder;
+    use faer::mat::Mat;
 
-    use super::*;
-    use nalgebra::DMatrix;
+    fn mat_from_row_slice(nrows: usize, ncols: usize, data: &[f64]) -> Mat<f64> {
+        assert_eq!(data.len(), nrows * ncols);
+        let mut m = Mat::zeros(nrows, ncols);
+        for i in 0..nrows {
+            for j in 0..ncols {
+                m[(i, j)] = data[i * ncols + j];
+            }
+        }
+        m
+    }
 
-    /// Checks that each row of the given matrix sums to zero.
+    /// Checks that each row of the given matrix sums to zero (within a small epsilon for floats).
     ///
     /// # Arguments
     ///
-    /// * `matrix` - Reference to a DMatrix<i32> whose rows will be checked.
-    fn assert_row_sums_zero(matrix: &DMatrix<i32>) {
+    /// * `matrix` - Reference to a Mat<f64> whose rows will be checked.
+    fn assert_row_sums_zero(matrix: &Mat<f64>) {
+        let eps = 1e-8;
         for i in 0..matrix.nrows() {
-            let mut sum = 0;
+            let mut sum = 0.0;
             for j in 0..matrix.ncols() {
                 sum += matrix[(i, j)];
             }
-            assert_eq!(
-                sum,
-                0,
-                "Row {} of Laplacian does not sum to zero. Row: {:?}",
+            assert!(
+                (sum - 0.0).abs() < eps,
+                "Row {} of Laplacian does not sum to zero. Row: {:?}, sum: {}",
                 i,
                 (0..matrix.ncols())
                     .map(|j| matrix[(i, j)])
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
+                sum
             );
+        }
+    }
+
+    /// Checks that two matrices are approximately equal elementwise (for floats).
+    fn assert_matrix_approx_eq(a: &Mat<f64>, b: &Mat<f64>, eps: f64, msg: &str) {
+        assert_eq!(
+            a.nrows(),
+            b.nrows(),
+            "Matrix row counts do not match: {:?}",
+            msg
+        );
+        assert_eq!(
+            a.ncols(),
+            b.ncols(),
+            "Matrix col counts do not match: {:?}",
+            msg
+        );
+        for i in 0..a.nrows() {
+            for j in 0..a.ncols() {
+                assert!(
+                    (a[(i, j)] - b[(i, j)]).abs() < eps,
+                    "{}: Mismatch at ({}, {}): {} != {}",
+                    msg,
+                    i,
+                    j,
+                    a[(i, j)],
+                    b[(i, j)]
+                );
+            }
         }
     }
 
@@ -107,11 +165,10 @@ mod tests {
     #[test]
     fn test_laplacian_undirected_two_node_single_edge() {
         // Build a simple undirected graph with two nodes A-B.
-        let mut g: GraphBuilder<&str, i32> = GraphBuilder::new();
+        let mut g: GraphBuilder<&str, f64> = GraphBuilder::new();
         g.add_vertex("A");
         g.add_vertex("B");
-        // Since this is undirected, add edges both ways (if the Graph is directed internally).
-        g.add_edge("A", "B", 1);
+        g.add_edge("A", "B", 1.0);
 
         let g = g.build();
 
@@ -121,11 +178,13 @@ mod tests {
         // Degree matrix D = [[1,0],[0,1]]
         // Adjacency A = [[0,1],[1,0]]
         // L = D - A = [[1,-1],[-1,1]]
-        let expected = DMatrix::from_row_slice(2, 2, &[1, -1, -1, 1]);
+        let expected = mat_from_row_slice(2, 2, &[1.0, -1.0, -1.0, 1.0]);
 
-        assert_eq!(
-            lap, expected,
-            "Undirected Laplacian does not match expected."
+        assert_matrix_approx_eq(
+            &lap,
+            &expected,
+            1e-8,
+            "Undirected Laplacian does not match expected.",
         );
         assert_row_sums_zero(&lap);
     }
@@ -137,20 +196,20 @@ mod tests {
     #[test]
     fn test_directed_out_in_laplacians_single_edge() {
         // Directed graph A -> B
-        let mut g: GraphBuilder<&str, i32> = GraphBuilder::new();
+        let mut g: GraphBuilder<&str, f64> = GraphBuilder::new();
         g.add_vertex("A");
         g.add_vertex("B");
-        g.add_edge("A", "B", 1);
+        g.add_edge("A", "B", 1.0);
 
         let g = g.build();
 
-        dbg!("adjacency: \n{}", g.adjacency_matrix_directed());
+        dbg!(g.adjacency_matrix_directed());
 
         let l_out = g.laplacian_matrix_out();
         let l_in = g.laplacian_matrix_in();
 
-        println!("L_out: \n{}", l_out);
-        println!("L_in: \n{}", l_in);
+        println!("L_out: \n{:?}", l_out);
+        println!("L_in: \n{:?}", l_in);
 
         // For adjacency A:
         // A = [[0,1],
@@ -159,28 +218,41 @@ mod tests {
         // In-degree  diag: [0,1]
         // L_out = D_out - A = [[1,-1],[0,0]]
         // L_in  = D_in  - A = [[0,-1],[0,1]]
-        let expected_out = DMatrix::from_row_slice(2, 2, &[1, -1, 0, 0]);
-        let expected_in = DMatrix::from_row_slice(2, 2, &[0, -1, 0, 1]);
+        let expected_out = mat_from_row_slice(2, 2, &[1.0, -1.0, 0.0, 0.0]);
+        let expected_in = mat_from_row_slice(2, 2, &[0.0, -1.0, 0.0, 1.0]);
 
-        println!("Expected L_out: \n{}", expected_out);
-        println!("Expected L_in: \n{}", expected_in);
+        println!("Expected L_out: \n{:?}", expected_out);
+        println!("Expected L_in: \n{:?}", expected_in);
 
-        assert_eq!(
-            l_out, expected_out,
-            "Out-Laplacian does not match expected."
+        assert_matrix_approx_eq(
+            &l_out,
+            &expected_out,
+            1e-8,
+            "Out-Laplacian does not match expected.",
         );
-        assert_eq!(l_in, expected_in, "In-Laplacian does not match expected.");
+        assert_matrix_approx_eq(
+            &l_in,
+            &expected_in,
+            1e-8,
+            "In-Laplacian does not match expected.",
+        );
 
         // Row-sum zero checks (each row sum should still be zero).
-        assert_row_sums_zero(&l_out.map(|v| v)); // map clone to ensure type i32
+        assert_row_sums_zero(&l_out);
 
         // Column sums for in-Laplacian should also be zero.
+        let eps = 1e-8;
         for j in 0..l_in.ncols() {
-            let mut sum = 0;
+            let mut sum = 0.0;
             for i in 0..l_in.nrows() {
                 sum += l_in[(i, j)];
             }
-            assert_eq!(sum, 0, "Column {} of In-Laplacian does not sum to zero.", j);
+            assert!(
+                sum.abs() < eps,
+                "Column {} of In-Laplacian does not sum to zero (sum: {}).",
+                j,
+                sum
+            );
         }
     }
 
@@ -191,11 +263,11 @@ mod tests {
     #[test]
     fn test_laplacian_with_isolated_vertex() {
         // Graph with three vertices A-B connected, C isolated.
-        let mut g: GraphBuilder<&str, i32> = GraphBuilder::new();
+        let mut g: GraphBuilder<&str, f64> = GraphBuilder::new();
         g.add_vertex("A");
         g.add_vertex("B");
         g.add_vertex("C");
-        g.add_edge("A", "B", 2);
+        g.add_edge("A", "B", 2.0);
 
         let g = g.build();
 
@@ -210,9 +282,14 @@ mod tests {
         // [[ 2,-2, 0],
         //  [-2, 2, 0],
         //  [ 0, 0, 0]]
-        let expected = DMatrix::from_row_slice(3, 3, &[2, -2, 0, -2, 2, 0, 0, 0, 0]);
+        let expected = mat_from_row_slice(3, 3, &[2.0, -2.0, 0.0, -2.0, 2.0, 0.0, 0.0, 0.0, 0.0]);
 
-        assert_eq!(lap, expected, "Laplacian with isolated vertex incorrect.");
+        assert_matrix_approx_eq(
+            &lap,
+            &expected,
+            1e-8,
+            "Laplacian with isolated vertex incorrect.",
+        );
         assert_row_sums_zero(&lap);
     }
 }
