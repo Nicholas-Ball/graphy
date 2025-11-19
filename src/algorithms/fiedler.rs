@@ -98,10 +98,8 @@ impl<
         let mut group1_indices = Vec::new();
         let mut group2_indices = Vec::new();
 
-        let pivot = fiedler_vector[0];
-
         for (i, &value) in fiedler_vector.iter().enumerate() {
-            if (value - pivot).abs() >= V::from_f64(0.01).unwrap() {
+            if value >= V::from_f64(0.01).unwrap() {
                 group1_indices.push(i);
             } else {
                 group2_indices.push(i);
@@ -263,6 +261,10 @@ mod fiedler_tests {
 
         let s1 = sorted(g1.get_vertices().clone());
         let s2 = sorted(g2.get_vertices().clone());
+
+        dbg!(&s1);
+        dbg!(&s2);
+
         let left = vec![0, 1, 2];
         let right = vec![3, 4, 5];
 

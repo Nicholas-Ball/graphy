@@ -138,19 +138,38 @@ impl<T: Eq + Hash + Clone, V> GraphBuilder<T, V> {
         let mut incoming_degree_matrix = faer::Mat::<V>::zeros(n, n);
         let mut outgoing_degree_matrix = faer::Mat::<V>::zeros(n, n);
 
+        let mut edges_evaluated = Vec::new();
+
         for (from, to, value) in self.edges.iter() {
+            if *value == V::zero() {
+                continue;
+            }
+
+            if !edges_evaluated.contains(&(*from, *to)) {
+                // Directed adjacency
+                directed_adjacency_matrix[(*from, *to)] = *value;
+
+                // Update weighted degrees
+                outgoing_degree_matrix[(*from, *from)] += V::one();
+                incoming_degree_matrix[(*to, *to)] += V::one();
+            }
+
+            // validate that an edge already exists before adding to degree matrix
+            if edges_evaluated.contains(&(*from, *to)) || edges_evaluated.contains(&(*to, *from)) {
+                continue;
+            }
+
             // Undirected adjacency (symmetric)
             adjacency_matrix[(*to, *from)] = *value;
             adjacency_matrix[(*from, *to)] = *value;
 
-            // Directed adjacency
-            directed_adjacency_matrix[(*from, *to)] = *value;
+            degree_matrix[(*from, *from)] += V::one();
 
-            // Update weighted degrees
-            outgoing_degree_matrix[(*from, *from)] += *value;
-            incoming_degree_matrix[(*to, *to)] += *value;
-            degree_matrix[(*from, *from)] += *value;
-            degree_matrix[(*to, *to)] += *value;
+            if *from != *to {
+                degree_matrix[(*to, *to)] += V::one();
+            }
+
+            edges_evaluated.push((*from, *to));
         }
 
         Graph {
